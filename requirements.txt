@@ -1,0 +1,12 @@
+# Pin loosely for now; tighten once the environment is working end-to-end.
+pandas>=2.2
+numpy>=1.26
+pyarrow>=16.0
+nfl_data_py>=0.3.2
+pymc>=5.16
+arviz>=0.18
+streamlit>=1.37
+plotly>=5.22
+python-dotenv>=1.0
+pytest>=8.0
+ruff>=0.5

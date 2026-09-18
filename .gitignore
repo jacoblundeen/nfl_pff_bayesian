@@ -1,0 +1,26 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# --- Environment / secrets ---
+.env
+*.pem
+
+# --- Data (raw/processed are pipeline outputs, not source-controlled) ---
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/
