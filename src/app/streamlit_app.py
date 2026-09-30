@@ -7,6 +7,16 @@ Run with:
     streamlit run src/app/streamlit_app.py
 """
 
+import sys
+from pathlib import Path
+
+# `streamlit run` (like `python script.py`) only puts this script's own
+# folder on sys.path, not the project root — unlike `python -m
+# src.data.fetch_pff`, which uses the current working directory instead.
+# Without this, `from src...` below fails with ModuleNotFoundError no
+# matter which directory you launch streamlit from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -83,7 +93,7 @@ def main() -> None:
             yaxis_title="PFF Offense Grade",
             height=450,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     total_dropbacks = int(player_df["dropbacks"].sum())
     st.metric("Total dropbacks this season", total_dropbacks)

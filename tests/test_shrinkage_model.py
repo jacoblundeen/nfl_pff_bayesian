@@ -21,7 +21,13 @@ def test_build_model_shapes_match_input():
     df = _toy_df()
     model, players = build_model(df)
     assert set(players) == {"A", "B"}
-    assert "theta" in [rv.name for rv in model.free_RVs]
+    # `named_vars` covers free RVs AND deterministics, so this holds
+    # regardless of parameterization — theta is a Deterministic (a
+    # transform of theta_offset) under the current non-centered setup,
+    # not a free RV directly, but it's still a first-class named
+    # variable that shows up in the posterior trace either way.
+    assert "theta" in model.named_vars
+    assert "theta_offset" in [rv.name for rv in model.free_RVs]
 
 
 def test_low_dropback_player_has_wider_uncertainty_input():

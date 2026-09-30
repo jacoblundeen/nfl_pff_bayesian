@@ -1,32 +1,46 @@
 """
-Pull weekly QB grades from the PFF API via the Restish CLI.
+Pull weekly QB offense grades from the PFF API via the Restish CLI.
 
-Why Restish and not `requests` directly: you've already got PFF auth
-configured as a Restish API alias, so shelling out to the CLI reuses
-that instead of re-implementing auth here. If you'd rather call the API
-directly with `requests`/`httpx` later, only this file needs to change —
-everything downstream just expects a CSV at config.PFF_RAW_FILE with the
-columns listed below.
+Confirmed against https://developer.pff.com/reference/ (2026-09-18) — this
+replaces an earlier guess at a single bulk "/v1/grades/weekly" endpoint,
+which doesn't exist. PFF's real shape is two endpoints used together:
 
-TODO before this runs for real:
-  1. Confirm your Restish alias name matches config.PFF_RESTISH_ALIAS
-     (check with `restish api list`).
-  2. Replace ENDPOINT_PATH below with the actual PFF endpoint for weekly
-     player grades (this varies by PFF contract/tier — check your API
-     docs or `restish <alias> --help` for the available routes).
-  3. Confirm the response field names in `_normalize()` match what PFF
-     actually returns — adjust the rename map accordingly.
+  1. GET /v1/facet/passing        (restish command: `passing`, real name
+     `facet-passing-summary` — confirmed via `restish pff passing --help`)
+     League-wide leaderboard. Takes `--league` and `--season`; there is
+     NO server-side position filter (an earlier version of this file
+     guessed `--position` — that flag doesn't exist and restish rejects
+     it outright). We fetch the full leaderboard and filter to QBs
+     client-side on the `position` column in the response instead.
+
+  2. GET /v1/player/offense/summary   (restish command: `player-offense-summary`)
+     Per-player, per-season. Passing `season` without `week` returns one
+     row per game that player played that season (a `weeks[]` array),
+     each with `grades_offense` and snap counts — the week-by-week series
+     the shrinkage model needs. NOT yet confirmed via --help like the
+     command above was.
+
+So pulling one season costs 1 (leaderboard) + (# of QBs found) API calls.
+Watch your PFF rate limit if you widen SEASONS or POSITION later;
+REQUEST_DELAY_SECONDS below adds a small pause between per-player calls.
 """
 
 import json
 import subprocess
+import time
 
 import pandas as pd
 
-from src.config import PFF_RAW_FILE, PFF_RESTISH_ALIAS, POSITION, SEASONS
+from src.config import (
+    LEAGUE,
+    PFF_RAW_FILE,
+    PFF_RESTISH_ALIAS,
+    PFF_RESTISH_PROFILE,
+    POSITION,
+    SEASONS,
+)
 
-# TODO: replace with the real PFF endpoint path for weekly grades.
-ENDPOINT_PATH = "/v1/grades/weekly"
+REQUEST_DELAY_SECONDS = 0.25
 
 # Columns the rest of the pipeline expects, regardless of PFF's raw naming.
 REQUIRED_COLUMNS = [
@@ -41,36 +55,54 @@ REQUIRED_COLUMNS = [
 ]
 
 
-def _restish_get(path: str, params: dict) -> dict:
-    """Run a single `restish <alias> GET <path>` call and parse the JSON."""
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    cmd = ["restish", PFF_RESTISH_ALIAS, "get", f"{path}?{query}"]
+def _restish_json(args: list[str]) -> dict:
+    """Run a restish command against the PFF API and parse its JSON body.
+
+    `-o json` gives clean JSON with no HTTP headers (per PFF's exporting
+    guide), and `-p ci` selects the API-key auth profile set up in
+    guide/authentication — required outside an interactive browser login.
+    """
+    cmd = ["restish", PFF_RESTISH_ALIAS, *args, "-o", "json", "-p", PFF_RESTISH_PROFILE]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     return json.loads(result.stdout)
 
 
-def _normalize(raw: list[dict]) -> pd.DataFrame:
-    """Map PFF's raw field names onto our internal schema."""
-    df = pd.DataFrame(raw)
+def _list_qb_ids(season: int, position: str) -> pd.DataFrame:
+    """player_id + player_name for every `position` player in `season`.
 
-    # TODO: adjust this rename map once you've confirmed PFF's actual
-    # field names from a real response.
-    rename_map = {
-        "playerId": "player_id",
-        "playerName": "player_name",
-        "teamName": "team",
-        "grade": "grade_offense",
-        "snapCounts": "snap_counts_offense",
-    }
-    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    Confirmed against `restish pff passing --help`: the leaderboard has
+    no server-side position filter, so we pull everyone and filter here.
+    Response envelope is `passing_summary`, each row's name field is
+    `player` (not `name`) and its id field is already `player_id`.
+    """
+    raw = _restish_json(["passing", "--league", LEAGUE, "--season", str(season)])
+    rows = raw.get("passing_summary", [])
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["player_id", "player_name"])
 
-    missing = set(REQUIRED_COLUMNS) - set(df.columns)
-    if missing:
-        raise ValueError(
-            f"PFF response is missing expected columns after normalization: {missing}. "
-            "Update the rename_map in _normalize() to match PFF's actual field names."
-        )
-    return df[REQUIRED_COLUMNS]
+    df = df.rename(columns={"player": "player_name"})
+    df = df[df["position"] == position]
+    return df[["player_id", "player_name"]].drop_duplicates()
+
+
+def _weekly_grades_for_player(player_id: str, season: int) -> pd.DataFrame:
+    """One row per game `player_id` played in `season`, with grade + snaps + team."""
+    raw = _restish_json(["player-offense-summary", LEAGUE, str(player_id), "--season", str(season)])
+    weeks = raw.get("offense_summary", {}).get("weeks", [])
+    df = pd.DataFrame(weeks)
+    if df.empty:
+        return df
+
+    df["snap_counts_offense"] = df["snap_counts_total"]
+    df["team"] = df.apply(
+        lambda r: r["home_team_name"]
+        if r.get("player_franchise_id") == r.get("home_franchise_id")
+        else r["away_team_name"],
+        axis=1,
+    )
+    df = df.rename(columns={"grades_offense": "grade_offense"})
+    return df[["player_id", "week", "position", "grade_offense", "snap_counts_offense", "team"]]
 
 
 def fetch_pff_weekly_grades(
@@ -79,12 +111,29 @@ def fetch_pff_weekly_grades(
     """Fetch weekly grades for every season in `seasons`, concatenated."""
     frames = []
     for season in seasons:
-        raw = _restish_get(ENDPOINT_PATH, {"season": season, "position": position})
-        # PFF's paginated/list responses commonly nest results under a key
-        # like "players" or "data" — adjust if `raw` isn't already a list.
-        records = raw["data"] if isinstance(raw, dict) and "data" in raw else raw
-        frames.append(_normalize(records))
-    return pd.concat(frames, ignore_index=True)
+        qbs = _list_qb_ids(season, position)
+        print(f"{season}: found {len(qbs)} {position}s on the passing leaderboard")
+
+        for _, qb in qbs.iterrows():
+            weekly = _weekly_grades_for_player(qb["player_id"], season)
+            if weekly.empty:
+                continue
+            weekly["season"] = season
+            weekly["player_name"] = qb["player_name"]
+            frames.append(weekly)
+            time.sleep(REQUEST_DELAY_SECONDS)
+
+    if not frames:
+        raise RuntimeError(
+            "No PFF data returned for any season/player — check season/position "
+            "values and that `restish pff whoami -p ci` still succeeds."
+        )
+
+    df = pd.concat(frames, ignore_index=True)
+    missing = set(REQUIRED_COLUMNS) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing expected columns after fetch: {missing}")
+    return df[REQUIRED_COLUMNS]
 
 
 def main() -> None:

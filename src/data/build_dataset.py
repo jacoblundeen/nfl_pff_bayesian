@@ -38,6 +38,27 @@ def join_sources(pff: pd.DataFrame, fastr: pd.DataFrame) -> pd.DataFrame:
         how="inner",
         suffixes=("_pff", "_fastr"),
     )
+
+    # Both sources carry a `player_id` and a `team` column, so the merge
+    # above suffixed BOTH instead of keeping one plain column — there is
+    # no bare `player_id`/`team` after a merge like this, only the _pff/
+    # _fastr variants. The model, backtest, and Streamlit app all key on
+    # a plain `player_id`, so pick a canonical one here rather than
+    # leaving that ambiguity for every downstream script to resolve.
+    #
+    # player_id: PFF's, since PFF grades are the thing being modeled and
+    # this is the id that traces back to the source of truth. Keep both
+    # _pff/_fastr versions around too — they're exactly what you'd diff
+    # against nfl_data_py's id crosswalk if you swap the name-based join
+    # above for a real id-based one later.
+    merged["player_id"] = merged["player_id_pff"]
+
+    # team: nflfastR's, since it's a standard team abbreviation; PFF's
+    # version comes from the home/away-franchise-matching heuristic in
+    # fetch_pff.py, which is the less-trusted of the two until confirmed
+    # against real data.
+    merged["team"] = merged["team_fastr"]
+
     return merged
 
 

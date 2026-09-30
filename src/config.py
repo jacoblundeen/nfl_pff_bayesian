@@ -26,6 +26,15 @@ SEASONS = [2022, 2023, 2024]
 # itself (~/.restish/apis.json) — nothing sensitive needs to live here.
 PFF_RESTISH_ALIAS = "pff"
 
+# The `-p ci` profile you set up in the authentication guide (reads your
+# key from the PFF_API_KEY env var rather than an interactive browser
+# login) — required for any non-interactive/scripted call.
+PFF_RESTISH_PROFILE = "ci"
+
+# PFF's league identifier for this project. Per developer.pff.com's spec,
+# valid values are "nfl", "ncaa", "aaf", "ufl".
+LEAGUE = "nfl"
+
 # Raw filenames, so every script reads/writes the same paths.
 PFF_RAW_FILE = DATA_RAW / "pff_qb_weekly_grades.csv"
 NFLFASTR_RAW_FILE = DATA_RAW / "nflfastr_qb_weekly.csv"

@@ -5,6 +5,7 @@ pyarrow>=16.0
 nfl_data_py>=0.3.2
 pymc>=5.16
 arviz>=0.18
+matplotlib>=3.8
 streamlit>=1.37
 plotly>=5.22
 python-dotenv>=1.0

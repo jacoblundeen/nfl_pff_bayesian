@@ -11,6 +11,7 @@ dependencies = [
     "nfl_data_py>=0.3.2",
     "pymc>=5.16",
     "arviz>=0.18",
+    "matplotlib>=3.8",  # pulled in by pymc's own progress bar rendering
     "streamlit>=1.37",
     "plotly>=5.22",
     "python-dotenv>=1.0",

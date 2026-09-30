@@ -7,6 +7,15 @@ Usage:
 """
 
 import argparse
+import sys
+from pathlib import Path
+
+# Running this as `python scripts/run_pipeline.py` only puts scripts/ on
+# sys.path, not the project root that `src` lives under — unlike
+# `python -m src.data.fetch_pff`, which uses the current working
+# directory instead. Without this, `from src...` below fails with
+# ModuleNotFoundError regardless of which directory you launch it from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import JOINED_FILE, SEASONS
 from src.data.build_dataset import build
