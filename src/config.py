@@ -39,3 +39,7 @@ LEAGUE = "nfl"
 PFF_RAW_FILE = DATA_RAW / "pff_qb_weekly_grades.csv"
 NFLFASTR_RAW_FILE = DATA_RAW / "nflfastr_qb_weekly.csv"
 JOINED_FILE = DATA_PROCESSED / "qb_weekly_joined.parquet"
+
+# Backtest writes here so the Streamlit app can display results without
+# re-running the (expensive) per-season model fits on every page load.
+BACKTEST_RESULTS_FILE = DATA_PROCESSED / "backtest_results.csv"

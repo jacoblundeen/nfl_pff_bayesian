@@ -75,8 +75,11 @@ def run(df: pd.DataFrame, seasons: list[int]) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    from src.config import JOINED_FILE, SEASONS
+    from src.config import BACKTEST_RESULTS_FILE, JOINED_FILE, SEASONS
 
     df = pd.read_parquet(JOINED_FILE)
     results = run(df, SEASONS)
     print(results.to_string(index=False))
+
+    results.to_csv(BACKTEST_RESULTS_FILE, index=False)
+    print(f"\nWrote results to {BACKTEST_RESULTS_FILE} for the Streamlit app's Validation tab.")
