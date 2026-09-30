@@ -133,6 +133,38 @@ def player_shrinkage_summary(idata: az.InferenceData, prob: float = 0.94) -> pd.
     )
 
 
+def season_player_summary(df: pd.DataFrame, season: int) -> pd.DataFrame:
+    """Fit the shrinkage model on ONE season only, and return a summary
+    with raw average, shrunk estimate, and total dropbacks per player.
+
+    Fitting per season (rather than once on all seasons pooled) matters:
+    a player's true skill can genuinely shift year to year, and both the
+    app and the backtest look at one season's weekly data at a time — a
+    shrunk estimate blended across seasons a viewer isn't looking at
+    would be misleading, not just imprecise.
+
+    Shared by two callers: scripts/precompute_season_summaries.py (fits
+    once per season, writes data/processed/season_summaries.csv so a
+    deployed app never needs to run PyMC live) and the Streamlit app's
+    live-fit fallback for local development before that file exists.
+    """
+    season_df = df[df["season"] == season]
+    idata = fit(season_df)
+    summary = player_shrinkage_summary(idata)
+
+    name_lookup = season_df[["player_id", "player_name"]].drop_duplicates().set_index(
+        "player_id"
+    )["player_name"]
+    raw_avg = season_df.groupby("player_id")["grade_offense"].mean().rename("raw_avg")
+    total_dropbacks = season_df.groupby("player_id")["dropbacks"].sum().rename("total_dropbacks")
+
+    summary = summary.set_index("player_id")
+    summary = summary.join(name_lookup).join(raw_avg).join(total_dropbacks)
+    summary["shrinkage_magnitude"] = (summary["theta_mean"] - summary["raw_avg"]).abs()
+    summary["season"] = season
+    return summary.reset_index()
+
+
 if __name__ == "__main__":
     from src.config import JOINED_FILE
 

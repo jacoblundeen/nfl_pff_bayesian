@@ -48,8 +48,8 @@ RMSE. See `src/validation/backtest.py`.
 | 2023 | 43 | 11.46 | 8.48  | Yes |
 | 2024 | 44 | 12.48 | 8.28  | Yes |
 
-Pooling a QB's weeks 1-8 grades toward the rest of the league, with the
-pull strength set by how many dropbacks back that grade, predicts their
+Pooling a QB's weeks 1-8 grades toward the rest of the league — with the
+pull strength set by how many dropbacks back that grade — predicts their
 next nine weeks of play better than trusting their own small sample at
 face value. That's the core claim of the project, holding up on three
 separate seasons rather than one favorable split.
@@ -58,14 +58,14 @@ separate seasons rather than one favorable split.
 
 The first version of this model used a "centered" parameterization
 (`theta ~ Normal(mu, sigma_player)`), which produced sampler divergences
-and a failed rhat check on real data, worst for exactly the low-snap
+and a failed rhat check on real data — worst for exactly the low-snap
 players this project is built to handle carefully, since a hierarchical
 model's posterior geometry forms a funnel that's hardest to sample near
 weakly-informed groups. Switching to a non-centered form
 (`theta = mu + theta_offset * sigma_player`, with `theta_offset ~
 Normal(0, 1)`) is the standard fix for this failure mode and eliminated
 the divergences entirely (0 across all three season fits, clean rhat)
-without materially changing the RMSE results above, a useful reminder
+without materially changing the RMSE results above — a useful reminder
 that a model can look like it's "working" (reasonable point estimates)
 while its underlying posterior samples aren't fully trustworthy yet. See
 the docstring in `src/models/shrinkage_model.py` for the full writeup.
@@ -102,7 +102,7 @@ restish api list
 
 `src/data/fetch_pff.py` calls two real PFF endpoints, confirmed against
 live data: `passing` to list QBs for a season (no server-side position
-filter, it pulls the full leaderboard and filters to QBs locally), then
+filter — it pulls the full leaderboard and filters to QBs locally), then
 `player-offense-summary` per QB to get that player's week-by-week
 grades. Confirm `PFF_RESTISH_PROFILE` in `src/config.py` matches the
 Restish profile name you set up in PFF's authentication guide (`ci` by
@@ -111,10 +111,55 @@ default, used for non-interactive/API-key auth).
 ## Running the pipeline
 
 ```bash
-python scripts/run_pipeline.py          # full run: fetch + build + validate
+python scripts/run_pipeline.py          # full run: fetch + build + validate + precompute
 python scripts/run_pipeline.py --skip-fetch   # reuse existing raw CSVs
 streamlit run src/app/streamlit_app.py   # launch the dashboard
 ```
+
+`run_pipeline.py` writes three files the dashboard reads directly:
+`qb_weekly_joined.parquet`, `backtest_results.csv`, and
+`season_summaries.csv` (the last from
+`scripts/precompute_season_summaries.py`, which you can also run on
+its own to refresh just that file). Without `season_summaries.csv`,
+Player Explorer and League Overview still work locally — they just
+fall back to fitting PyMC live the first time each season is picked.
+
+## Deploying to Streamlit Community Cloud
+
+These three processed files are deliberately *not* gitignored (see the
+comment in `.gitignore`), specifically so a deployment doesn't need to
+re-run the PFF fetch or fit PyMC live on limited cloud CPU. `data/raw/`
+(the untouched PFF API pulls) stays ignored either way.
+
+> **Before doing this**, know that PFF's terms of service
+> ([pff.com/terms](https://pff.com/terms)) restrict public distribution
+> and republishing of API Data, including on third-party websites —
+> which a Streamlit Community Cloud deployment is. That restriction is
+> why `data/` was gitignored by default in the first place. This repo
+> proceeds with real data deployed publicly as a deliberate, informed
+> choice; read the terms yourself before doing the same with your own
+> API access.
+
+1. Run `python scripts/run_pipeline.py` locally so all three processed
+   files exist, then commit and push them along with the rest of the repo:
+   ```bash
+   git add data/processed/qb_weekly_joined.parquet data/processed/backtest_results.csv data/processed/season_summaries.csv
+   git add -A
+   git commit -m "Add processed data for deployment"
+   git push
+   ```
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with
+   GitHub, and click **New app**.
+3. Pick this repo and branch, and set the main file path to
+   `src/app/streamlit_app.py`.
+4. Under **Advanced settings**, set the Python version to match
+   `requires-python` in `pyproject.toml` (3.11+). No secrets are
+   needed — the deployed app only reads the committed static files,
+   it never calls the PFF API or PyMC.
+5. Deploy. First build takes a few minutes (installing `pymc`/`arviz`
+   even though the live-fit path they support isn't exercised by
+   default); page loads after that should be near-instant, since
+   `season_summaries.csv` is what actually gets read.
 
 ## Tests
 

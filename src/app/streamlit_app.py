@@ -15,8 +15,14 @@ Streamlit dashboard for the QB grade shrinkage project, in four tabs:
                       hard, high-snap players barely move.
   Model Validation — the backtest's raw-average-vs-shrunk RMSE comparison
                       (src/validation/backtest.py), read from a
-                      precomputed file rather than refit live (see note
-                      on fit_season_model below).
+                      precomputed file rather than refit live.
+
+Player Explorer and League Overview prefer data/processed/
+season_summaries.csv (written by scripts/precompute_season_summaries.py)
+over fitting PyMC live, so a deployment with limited CPU — a Streamlit
+Community Cloud app in particular — never has to run MCMC for a
+visitor. Locally, before that file exists, both tabs fall back to a
+live per-season fit automatically.
 
 Run with:
     streamlit run src/app/streamlit_app.py
@@ -38,48 +44,52 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.config import BACKTEST_RESULTS_FILE, JOINED_FILE
-from src.models.shrinkage_model import fit, player_shrinkage_summary
+from src.config import BACKTEST_RESULTS_FILE, JOINED_FILE, SEASON_SUMMARY_FILE
 
 st.set_page_config(page_title="QB Grade Shrinkage", layout="wide")
 
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
+def load_data() -> pd.DataFrame | None:
+    if not JOINED_FILE.exists():
+        return None
     return pd.read_parquet(JOINED_FILE)
 
 
+@st.cache_data
+def load_precomputed_season_summaries() -> pd.DataFrame | None:
+    """The fast path: read scripts/precompute_season_summaries.py's
+    output if it exists, so a deployed app never needs PyMC at all."""
+    if not SEASON_SUMMARY_FILE.exists():
+        return None
+    return pd.read_csv(SEASON_SUMMARY_FILE)
+
+
 @st.cache_resource
-def fit_season_model(df: pd.DataFrame, season: int) -> pd.DataFrame:
-    """Fit the shrinkage model on ONE season only, and return a summary
-    with raw average, shrunk estimate, and total dropbacks per player.
+def fit_season_model_live(df: pd.DataFrame, season: int) -> pd.DataFrame:
+    """Local-dev fallback: fit the shrinkage model on one season live.
 
-    Fitting per season (rather than once on all seasons pooled) matters:
-    a player's true skill can genuinely shift year to year, and the
-    chart below shows one season's weekly dots at a time — a shrunk line
-    blended across seasons the viewer isn't looking at would be
-    misleading, not just imprecise. This also matches how the backtest
-    in src/validation/backtest.py already works (one fit per season), so
-    the whole project is now consistent about what "the model" means.
-
-    Streamlit reruns this once per season the first time it's selected,
-    then serves it from cache — expect a ~15-20s pause the first time
-    you pick a given season, instant after that.
+    Only reached when data/processed/season_summaries.csv doesn't exist
+    yet. pymc/pytensor are imported here, inside the function, rather
+    than at module level — so a deployment shipping the precomputed
+    file never pays for importing them at all. Streamlit caches this
+    per season: expect a ~15-20s pause the first time a season is
+    picked, instant after that.
     """
-    season_df = df[df["season"] == season]
-    idata = fit(season_df)
-    summary = player_shrinkage_summary(idata)
+    from src.models.shrinkage_model import season_player_summary
 
-    name_lookup = season_df[["player_id", "player_name"]].drop_duplicates().set_index(
-        "player_id"
-    )["player_name"]
-    raw_avg = season_df.groupby("player_id")["grade_offense"].mean().rename("raw_avg")
-    total_dropbacks = season_df.groupby("player_id")["dropbacks"].sum().rename("total_dropbacks")
+    return season_player_summary(df, season)
 
-    summary = summary.set_index("player_id")
-    summary = summary.join(name_lookup).join(raw_avg).join(total_dropbacks)
-    summary["shrinkage_magnitude"] = (summary["theta_mean"] - summary["raw_avg"]).abs()
-    return summary.reset_index()
+
+def get_season_summary(
+    df: pd.DataFrame, season: int, precomputed: pd.DataFrame | None
+) -> pd.DataFrame:
+    """Precomputed file first; live PyMC fit only as a local-dev fallback."""
+    if precomputed is not None:
+        subset = precomputed[precomputed["season"] == season]
+        if not subset.empty:
+            return subset
+    return fit_season_model_live(df, season)
 
 
 @st.cache_data
@@ -226,11 +236,13 @@ story.)
     )
 
 
-def render_player_explorer(df: pd.DataFrame, seasons: list[int]) -> None:
+def render_player_explorer(
+    df: pd.DataFrame, seasons: list[int], precomputed: pd.DataFrame | None
+) -> None:
     col1, col2 = st.columns([1, 3])
     with col1:
         season = st.selectbox("Season", seasons, key="explorer_season")
-        summary = fit_season_model(df, season)
+        summary = get_season_summary(df, season, precomputed)
         player_options = sorted(summary["player_name"].dropna().unique())
         player_name = st.selectbox("Quarterback", player_options, key="explorer_player")
 
@@ -282,9 +294,11 @@ def render_player_explorer(df: pd.DataFrame, seasons: list[int]) -> None:
     )
 
 
-def render_league_overview(df: pd.DataFrame, seasons: list[int]) -> None:
+def render_league_overview(
+    df: pd.DataFrame, seasons: list[int], precomputed: pd.DataFrame | None
+) -> None:
     season = st.selectbox("Season", seasons, key="league_season")
-    summary = fit_season_model(df, season)
+    summary = get_season_summary(df, season, precomputed)
 
     fig = px.scatter(
         summary,
@@ -365,7 +379,16 @@ def main() -> None:
     )
 
     df = load_data()
+    if df is None:
+        st.error(
+            "No joined dataset found at `data/processed/qb_weekly_joined.parquet`. "
+            "Run `python scripts/run_pipeline.py` locally to build it, then make sure "
+            "it's committed if this is a deployment."
+        )
+        st.stop()
+
     seasons = sorted(df["season"].unique(), reverse=True)
+    precomputed = load_precomputed_season_summaries()
 
     tab_how, tab_explorer, tab_league, tab_validation = st.tabs(
         ["How It Works", "Player Explorer", "League Overview", "Model Validation"]
@@ -373,9 +396,9 @@ def main() -> None:
     with tab_how:
         render_methodology()
     with tab_explorer:
-        render_player_explorer(df, seasons)
+        render_player_explorer(df, seasons, precomputed)
     with tab_league:
-        render_league_overview(df, seasons)
+        render_league_overview(df, seasons, precomputed)
     with tab_validation:
         render_validation(load_backtest_results())
 

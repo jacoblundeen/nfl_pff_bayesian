@@ -43,3 +43,10 @@ JOINED_FILE = DATA_PROCESSED / "qb_weekly_joined.parquet"
 # Backtest writes here so the Streamlit app can display results without
 # re-running the (expensive) per-season model fits on every page load.
 BACKTEST_RESULTS_FILE = DATA_PROCESSED / "backtest_results.csv"
+
+# scripts/precompute_season_summaries.py writes here: one row per
+# player-season with the shrunk estimate, raw average, and dropback
+# count. Lets the Streamlit app (and a public deployment in particular,
+# which has limited CPU and shouldn't run MCMC per visitor) read a
+# static file instead of fitting PyMC live for every season selected.
+SEASON_SUMMARY_FILE = DATA_PROCESSED / "season_summaries.csv"

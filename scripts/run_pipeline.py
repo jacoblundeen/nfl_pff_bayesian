@@ -17,10 +17,13 @@ from pathlib import Path
 # ModuleNotFoundError regardless of which directory you launch it from.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import JOINED_FILE, SEASONS
+import pandas as pd
+
+from src.config import JOINED_FILE, SEASON_SUMMARY_FILE, SEASONS
 from src.data.build_dataset import build
 from src.data.fetch_nflfastr import fetch_qb_weekly_context
 from src.data.fetch_pff import fetch_pff_weekly_grades
+from src.models.shrinkage_model import season_player_summary
 from src.validation.backtest import run as run_backtest
 
 
@@ -41,6 +44,13 @@ def main() -> None:
     print("Running train/holdout backtest (this fits PyMC models per season)...")
     results = run_backtest(df, SEASONS)
     print(results.to_string(index=False))
+
+    print("\nFitting full-season shrinkage summaries for the dashboard...")
+    summaries = pd.concat(
+        [season_player_summary(df, season) for season in SEASONS], ignore_index=True
+    )
+    summaries.to_csv(SEASON_SUMMARY_FILE, index=False)
+    print(f"Wrote {len(summaries)} player-season rows to {SEASON_SUMMARY_FILE}")
 
     print(f"\nJoined dataset available at {JOINED_FILE} for the Streamlit app.")
 

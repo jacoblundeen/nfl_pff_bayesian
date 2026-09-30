@@ -15,10 +15,18 @@ venv/
 *.pem
 
 # --- Data (raw/processed are pipeline outputs, not source-controlled) ---
+# Exceptions below: these three processed files are what the deployed
+# Streamlit app reads (see src/app/streamlit_app.py) — committed
+# deliberately so a public deployment doesn't need to re-run the PFF
+# fetch or a live PyMC fit. data/raw/ (the untouched PFF API pulls)
+# stays fully ignored either way.
 data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/processed/qb_weekly_joined.parquet
+!data/processed/backtest_results.csv
+!data/processed/season_summaries.csv
 
 # --- OS / editor ---
 .DS_Store
